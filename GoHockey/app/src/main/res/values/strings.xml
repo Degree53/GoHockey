@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">GoHockey</string>
+
+    <string name="version_label">GoHockey version name: %1$s version code: %2$d</string>
+</resources>

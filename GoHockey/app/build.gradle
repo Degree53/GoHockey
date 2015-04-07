@@ -1,0 +1,118 @@
+apply plugin: 'com.android.application'
+
+dependencies {
+    compile fileTree(dir: 'libs', include: ['*.jar'])
+    compile 'com.android.support:appcompat-v7:21.0.3'
+}
+
+android {
+    compileSdkVersion 21
+    buildToolsVersion "21.1.2"
+
+    def pipelineCounter = ""
+    pipelineCounter = System.getenv('GO_PIPELINE_COUNTER')
+    def projectVersionName = "1.0.0"
+    def projectVersionCode = "1"
+
+    if(pipelineCounter != null){
+        projectVersionCode = pipelineCounter
+        projectVersionName = projectVersionName + "." + projectVersionCode
+    }
+
+    defaultConfig {
+        applicationId "com.degree53.gohockey"
+        minSdkVersion 16
+        targetSdkVersion 21
+        versionCode Integer.parseInt(projectVersionCode)
+        versionName projectVersionName
+    }
+
+    signingConfigs {
+        release {
+            //Example only, use this method in production: http://www.thoughtworks.com/insights/blog/signing-open-source-android-apps-without-disclosing-passwords
+            storeFile file("keystore.jks")
+            storePassword "XXXXXXXX"
+            keyAlias "alias"
+            keyPassword "XXXXXXXX"
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    boolean isWindows = System.getProperty("os.name").contains("Win")
+    boolean isOSX = System.getProperty("os.name").contains("OS X");
+
+    //Linux directory for build server
+    def devDir = '/var/go/Builds/GoHockey/dev/' + defaultConfig.versionName
+
+    //Developer building locally on their own machines:
+    if(isWindows){
+        devDir = 'S:/Development/Android/GradleBuilds/GoHockey/' + defaultConfig.versionName
+    } else if(isOSX){
+        devDir = 'GradleBuilds/dev/' + defaultConfig.versionName
+    }
+   
+    applicationVariants.all { variant ->
+        def hockeyUpload = project.tasks.create("hockey${variant.name}Upload", Exec){ 
+
+            //Need to initialise this way to prevent compile error in Android Studio
+            def revision = ""
+            revision = System.getenv('GO_REVISION')
+
+            def fromRevision = ""
+            fromRevision = System.getenv('GO_FROM_REVISION')
+
+            def appID = ""
+            appID = System.getenv('HOCKEY_APP_ID')
+
+            def apiToken = ""
+            apiToken = System.getenv('HOCKEY_API_TOKEN')
+
+            if(revision == null || appID == null || apiToken == null){
+                def serverURL = ""
+                serverURL = System.getenv('GO_SERVER_URL')
+                if(serverURL != null){
+                    throw new GradleException('GO_REVISION, HOCKEY_APP_ID, or HOCKEY_API_TOKEN not available')
+                }else{
+                    println('GO_REVISION, HOCKEY_APP_ID, or HOCKEY_API_TOKEN not available')
+                }
+            }else{
+                commandLine 'bash', '-c', new StringBuilder().append("bash")
+                                            .append(" " + project.projectDir + "/hockeyupload.sh")
+                                            .append(" " + variant.outputs[0].outputFile)
+                                            .append(" \"" + revision + "\"")
+                                            .append(" \"" + fromRevision + "\"")
+                                            .append(" " + appID)
+                                            .append(" " + apiToken)
+                                            .toString();
+            }                                                        
+        }
+
+        hockeyUpload.description = "Upload .apk to HockeyApp (be sure to add token/key to environment variables on the build server)"
+
+        def task = project.tasks.create("devPublish${variant.name}Apk", Copy)
+        task.from(variant.outputs[0].outputFile)
+        task.rename { String fileName ->
+            fileName.replace('.apk', '_' + variant.versionName + '.apk')
+        }
+        task.rename { String fileName ->
+            fileName.replaceAll('-', '_');
+        }
+        task.rename { String fileName ->
+            fileName.replaceAll('_release', '');
+        }
+        task.exclude { details ->
+            details.name.contains('debug-unaligned') 
+        }
+        task.into(devDir)
+        task.dependsOn variant.assemble
+
+        hockeyUpload.dependsOn task
+    }
+}
